@@ -1,20 +1,28 @@
 #include <Arduino.h>
+#include <WiFiManager.h> // install from PlatformIO lib_deps
 
-int ledPin = 2; // found onboard LED pin
+WiFiManager wm;
 
 void setup()
 {
   Serial.begin(115200);
-  pinMode(ledPin, OUTPUT);
+
+  // Start AP if no saved Wi-Fi, otherwise connect
+  // IP address: 192.168.4.1
+  if (!wm.autoConnect("ESP32-Setup", "12345678"))
+  {
+    Serial.println("Failed to connect, running AP mode");
+  }
+  else
+  {
+    Serial.println("Connected to Wi-Fi!");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  }
 }
 
 void loop()
 {
-  digitalWrite(ledPin, HIGH);
-  Serial.println("LED ON");
-  delay(1000);
-
-  digitalWrite(ledPin, LOW);
-  Serial.println("LED OFF");
-  delay(1000);
+  // This keeps the configuration portal running
+  wm.process();
 }
