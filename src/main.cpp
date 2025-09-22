@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include "esp_camera.h"
 
 // ================== WiFi Module ==================
 class WiFiModule
@@ -11,8 +12,6 @@ public:
   void init()
   {
     Serial.begin(115200);
-
-    // Start AP if no saved Wi-Fi, otherwise connect
     if (!wm.autoConnect("ESP32-Setup", "12345678"))
     {
       Serial.println("Failed to connect, running AP mode");
@@ -27,7 +26,6 @@ public:
 
   void update()
   {
-    // Keep WiFiManager portal alive
     wm.process();
   }
 };
@@ -36,24 +34,20 @@ public:
 class DiscordModule
 {
 public:
-  bool messageSent = false; // flag to send only once
+  bool messageSent = false;
 
-  void init()
-  {
-    // nothing special here, could preload config later
-  }
+  void init() {}
 
   void update()
   {
     if (WiFi.status() == WL_CONNECTED && !messageSent)
     {
-      sendMessage("ESP32 is online and connected!");
-      messageSent = true; // prevent re-sending
+      sendText("ESP32 is online and connected!");
+      messageSent = true;
     }
   }
 
-private:
-  void sendMessage(const String &content)
+  void sendText(const String &content)
   {
     HTTPClient http;
     String webhook_url = "https://discord.com/api/webhooks/1417920471592079360/q2cZ47f8lfYEjiucKH9maS7IBV57DyHPLhPrnY0CQJxxK_ZIqmne98x20Lg9zGgA41tY";
@@ -79,14 +73,102 @@ private:
   }
 };
 
+// ================== Camera Module ==================
+class CameraModule
+{
+public:
+  bool initialized = false;
+
+  void init()
+  {
+    camera_config_t config;
+    config.ledc_channel = LEDC_CHANNEL_0;
+    config.ledc_timer = LEDC_TIMER_0;
+
+    config.pin_pwdn = -1;
+    config.pin_reset = -1;
+    config.pin_xclk = 15;
+    config.pin_sccb_sda = 4;
+    config.pin_sccb_scl = 5;
+
+    config.pin_d0 = 11;
+    config.pin_d1 = 9;
+    config.pin_d2 = 8;
+    config.pin_d3 = 10;
+    config.pin_d4 = 12;
+    config.pin_d5 = 18;
+    config.pin_d6 = 17;
+    config.pin_d7 = 16;
+
+    config.pin_vsync = 6;
+    config.pin_href = 7;
+    config.pin_pclk = 13;
+
+    config.xclk_freq_hz = 20000000;
+    config.pixel_format = PIXFORMAT_JPEG;
+
+    config.frame_size = FRAMESIZE_QQVGA;
+    config.fb_location = CAMERA_FB_IN_DRAM; // no PSRAM
+    config.jpeg_quality = 30;
+    config.fb_count = 1;
+
+    Serial.println("Calling esp_camera_init...");
+    esp_err_t err = esp_camera_init(&config);
+    if (err == ESP_OK)
+    {
+      Serial.println("Camera init OK");
+      initialized = true;
+    }
+    else
+    {
+      Serial.printf("Camera init FAIL, error 0x%x\n", err);
+      initialized = false;
+    }
+  }
+
+  camera_fb_t *capture()
+  {
+    if (!initialized)
+      return nullptr;
+    return esp_camera_fb_get();
+  }
+
+  void release(camera_fb_t *fb)
+  {
+    if (fb)
+      esp_camera_fb_return(fb);
+  }
+};
+
 // ================== Main Program ==================
 WiFiModule wifi;
 DiscordModule discord;
+CameraModule camera;
 
 void setup()
 {
   wifi.init();
   discord.init();
+  camera.init();
+
+  delay(5000); // Wi-Fi stabilize
+
+  if (WiFi.status() == WL_CONNECTED && camera.initialized)
+  {
+    camera_fb_t *fb = camera.capture();
+    if (fb)
+    {
+      String msg = "Photo captured! Size: " + String(fb->len) + " bytes (" +
+                   String(fb->width) + "x" + String(fb->height) + ")";
+      Serial.println(msg);
+      discord.sendText(msg);
+      camera.release(fb);
+    }
+    else
+    {
+      discord.sendText("Failed to capture image!");
+    }
+  }
 }
 
 void loop()
