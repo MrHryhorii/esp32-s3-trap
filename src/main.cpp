@@ -71,6 +71,62 @@ public:
 
     http.end();
   }
+
+  void sendImage(uint8_t *buf, size_t len)
+  {
+    if (WiFi.status() != WL_CONNECTED)
+      return;
+
+    HTTPClient http;
+    String webhook_url = "https://discord.com/api/webhooks/1417920471592079360/q2cZ47f8lfYEjiucKH9maS7IBV57DyHPLhPrnY0CQJxxK_ZIqmne98x20Lg9zGgA41tY";
+    String boundary = "----esp32formboundary"; // custom boundary for multipart request
+
+    http.begin(webhook_url);
+    http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+    // ---- Prepare multipart body ----
+    // "head" contains headers for the file upload
+    String head = "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"file\"; filename=\"photo.jpg\"\r\n";
+    head += "Content-Type: image/jpeg\r\n\r\n";
+
+    // "tail" closes the multipart message
+    String tail = "\r\n--" + boundary + "--\r\n";
+
+    // Calculate total body length
+    int totalLen = head.length() + len + tail.length();
+
+    // Allocate buffer to hold the whole request body
+    uint8_t *body = (uint8_t *)malloc(totalLen);
+    if (!body)
+    {
+      Serial.println("Body malloc failed");
+      return;
+    }
+
+    // Copy parts into the buffer: head + image + tail
+    memcpy(body, head.c_str(), head.length());
+    memcpy(body + head.length(), buf, len);
+    memcpy(body + head.length() + len, tail.c_str(), tail.length());
+
+    // ---- Send POST request with binary data ----
+    int code = http.POST(body, totalLen);
+
+    // Free the allocated memory after sending
+    free(body);
+
+    // ---- Print the result ----
+    if (code > 0)
+    {
+      Serial.printf("Image upload response code: %d\n", code);
+    }
+    else
+    {
+      Serial.printf("Upload failed, error: %s\n", http.errorToString(code).c_str());
+    }
+
+    http.end();
+  }
 };
 
 // ================== Camera Module ==================
@@ -162,6 +218,7 @@ void setup()
                    String(fb->width) + "x" + String(fb->height) + ")";
       Serial.println(msg);
       discord.sendText(msg);
+      discord.sendImage(fb->buf, fb->len);
       camera.release(fb);
     }
     else
